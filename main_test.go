@@ -58,8 +58,20 @@ func TestSchemeSimulator(t *testing.T) {
 			maxDuration:    10 * time.Millisecond,
 		},
 		{
+			name:           "Empty Amount",
+			input:          "PAYMENT|",
+			expectedOutput: "RESPONSE|REJECTED|Invalid amount",
+			maxDuration:    10 * time.Millisecond,
+		},
+		{
 			name:           "Invalid Request Format",
 			input:          "INVALID|100",
+			expectedOutput: "RESPONSE|REJECTED|Invalid request",
+			maxDuration:    10 * time.Millisecond,
+		},
+		{
+			name:           "Invalid Request Format with extra field",
+			input:          "PAYMENT|10|HELLO",
 			expectedOutput: "RESPONSE|REJECTED|Invalid request",
 			maxDuration:    10 * time.Millisecond,
 		},

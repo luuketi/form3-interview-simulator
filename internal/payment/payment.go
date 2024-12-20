@@ -22,7 +22,7 @@ func FromString(request string) Payment {
 	if err != nil {
 		return Payment{ErrorReason: "Invalid amount"}
 	}
-	return Payment{Amount: uint64(amount)}
+	return Payment{Amount: amount}
 }
 
 func (p Payment) Process() string {
