@@ -45,7 +45,8 @@ func handleConnection(conn net.Conn) {
 
 func handleRequest(request string) string {
 	payment := payment.FromString(request)
-	return payment.Process()
+	response := payment.Process()
+	return response.ToString()
 }
 
 func main() {

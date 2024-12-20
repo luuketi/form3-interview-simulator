@@ -1,7 +1,7 @@
 package payment
 
 import (
-	"fmt"
+	"github.com/form3tech-oss/interview-simulator/internal/response"
 	"strconv"
 	"strings"
 	"time"
@@ -25,9 +25,9 @@ func FromString(request string) Payment {
 	return Payment{Amount: amount}
 }
 
-func (p Payment) Process() string {
+func (p Payment) Process() response.Response {
 	if p.ErrorReason != "" {
-		return fmt.Sprintf("RESPONSE|REJECTED|%s", p.ErrorReason)
+		return response.NewRejected(p.ErrorReason)
 	}
 
 	if p.Amount > 100 {
@@ -37,6 +37,5 @@ func (p Payment) Process() string {
 		}
 		time.Sleep(time.Duration(processingTime) * time.Millisecond)
 	}
-
-	return "RESPONSE|ACCEPTED|Transaction processed"
+	return response.NewAccepted("Transaction processed")
 }
