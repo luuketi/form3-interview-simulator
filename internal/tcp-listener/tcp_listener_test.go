@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -221,6 +222,21 @@ func (suite *TcpListenerTestSuite) Test_FailingListener() {
 	suite.Equal(expectedErr, err)
 }
 
+func (suite *TcpListenerTestSuite) Test_FailingAcceptShouldRetry() {
+	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+	l := NewListenerMock()
+	l.On("Accept").Return(new(net.TCPConn), errors.New("test error")).Times(2)
+	netListener := NetListenerMock(l)
+
+	listener, err := New(logger, &netListener, 8080, WAIT_PERIOD)
+	go listener.Start()
+	time.Sleep(1 * time.Second)
+
+	suite.NotNil(listener)
+	suite.Nil(err)
+	l.AssertExpectations(suite.T())
+}
+
 type MockNetListener struct {
 	listener net.Listener
 	err      error
@@ -243,9 +259,25 @@ func (b *MockNetListener) Listen(network string, address string) (net.Listener, 
 
 type ListenerMock struct {
 	mock.Mock
+	wg               sync.WaitGroup
+	mu               sync.Mutex
+	connectionsCount int
+}
+
+func NewListenerMock() *ListenerMock {
+	l := &ListenerMock{wg: sync.WaitGroup{}}
+	l.wg.Add(1)
+	return l
 }
 
 func (m *ListenerMock) Accept() (net.Conn, error) {
+	m.mu.Lock()
+	if m.connectionsCount < 2 {
+		m.connectionsCount++
+		m.mu.Unlock()
+	} else {
+		m.wg.Wait()
+	}
 	args := m.Called()
 	return args.Get(0).(net.Conn), args.Error(1)
 }
