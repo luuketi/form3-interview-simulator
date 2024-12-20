@@ -30,12 +30,19 @@ func (p Payment) Process() response.Response {
 		return response.NewRejected(p.ErrorReason)
 	}
 
-	if p.Amount > 100 {
-		processingTime := p.Amount
-		if p.Amount > 10000 {
-			processingTime = 10000
-		}
-		time.Sleep(time.Duration(processingTime) * time.Millisecond)
-	}
+	processingTime := p.processingTime()
+	time.Sleep(processingTime * time.Millisecond)
 	return response.NewAccepted("Transaction processed")
+}
+
+func (p Payment) processingTime() (processingTime time.Duration) {
+	switch {
+	case p.Amount > 10000:
+		processingTime = 10000
+	case p.Amount > 100:
+		processingTime = time.Duration(p.Amount)
+	default:
+		processingTime = 0
+	}
+	return
 }
