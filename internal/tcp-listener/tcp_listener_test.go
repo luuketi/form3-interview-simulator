@@ -115,3 +115,71 @@ func (suite *TcpListenerTestSuite) TestSchemeSimulator() {
 		})
 	}
 }
+
+func (suite *TcpListenerTestSuite) Test_TwoRequestsInOneConnection() {
+	msg1 := "PAYMENT|10"
+	msg2 := "PAYMENT|50"
+	expectedResponse := "RESPONSE|ACCEPTED|Transaction processed"
+
+	conn, err := net.Dial("tcp", ":8080")
+	suite.NoError(err, "Failed to connect to server")
+	defer conn.Close()
+
+	_, err = fmt.Fprintf(conn, msg1+"\n")
+	suite.NoError(err, "Failed to send request 1")
+	_, err = fmt.Fprintf(conn, msg2+"\n")
+	suite.NoError(err, "Failed to send request 2")
+
+	start := time.Now()
+
+	response1, err := bufio.NewReader(conn).ReadString('\n')
+	suite.NoError(err, "Failed to read response")
+	response1 = strings.TrimSpace(response1)
+
+	response2, err := bufio.NewReader(conn).ReadString('\n')
+	suite.NoError(err, "Failed to read response")
+	response2 = strings.TrimSpace(response2)
+
+	duration := time.Since(start)
+
+	suite.Equal(expectedResponse, response1, "Unexpected response")
+	suite.Equal(expectedResponse, response2, "Unexpected response")
+
+	suite.LessOrEqual(duration, 50*time.Millisecond, "Response time was longer than expected")
+}
+
+func (suite *TcpListenerTestSuite) Test_TwoRequestsInTwoConnections() {
+	msg1 := "PAYMENT|10"
+	msg2 := "PAYMENT|50"
+	expectedResponse := "RESPONSE|ACCEPTED|Transaction processed"
+
+	conn1, err := net.Dial("tcp", ":8080")
+	suite.NoError(err, "Failed to connect to server")
+	defer conn1.Close()
+
+	conn2, err := net.Dial("tcp", ":8080")
+	suite.NoError(err, "Failed to connect to server")
+	defer conn2.Close()
+
+	_, err = fmt.Fprintf(conn1, msg1+"\n")
+	suite.NoError(err, "Failed to send request 1")
+	_, err = fmt.Fprintf(conn2, msg2+"\n")
+	suite.NoError(err, "Failed to send request 2")
+
+	start := time.Now()
+
+	response1, err := bufio.NewReader(conn1).ReadString('\n')
+	suite.NoError(err, "Failed to read response")
+	response1 = strings.TrimSpace(response1)
+
+	response2, err := bufio.NewReader(conn2).ReadString('\n')
+	suite.NoError(err, "Failed to read response")
+	response2 = strings.TrimSpace(response2)
+
+	duration := time.Since(start)
+
+	suite.Equal(expectedResponse, response1, "Unexpected response")
+	suite.Equal(expectedResponse, response2, "Unexpected response")
+
+	suite.LessOrEqual(duration, 50*time.Millisecond, "Response time was longer than expected")
+}
