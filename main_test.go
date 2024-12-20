@@ -52,6 +52,12 @@ func TestSchemeSimulator(t *testing.T) {
 			maxDuration:    10 * time.Millisecond,
 		},
 		{
+			name:           "Invalid Amount with decimal numbers",
+			input:          "PAYMENT|101.123",
+			expectedOutput: "RESPONSE|REJECTED|Invalid amount",
+			maxDuration:    10 * time.Millisecond,
+		},
+		{
 			name:           "Invalid Request Format",
 			input:          "INVALID|100",
 			expectedOutput: "RESPONSE|REJECTED|Invalid request",
