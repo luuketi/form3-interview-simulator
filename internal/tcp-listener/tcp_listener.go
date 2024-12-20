@@ -4,47 +4,62 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/form3tech-oss/interview-simulator/internal/payment"
+	"github.com/rs/zerolog"
 	"net"
+	"time"
 )
 
-const (
-	PORT = 8080
-)
+type TcpListener struct {
+	logger     zerolog.Logger
+	listener   net.Listener
+	waitPeriod time.Duration
+}
 
-func Start() error {
-	listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", PORT))
+func New(logger zerolog.Logger, port uint16, waitPeriod time.Duration) (*TcpListener, error) {
+	l, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
 	if err != nil {
-		return err
+		logger.Error().Err(err).Msg("Error listening connection.")
+		return nil, err
 	}
-	defer listener.Close()
+	return &TcpListener{
+			logger:     logger,
+			listener:   l,
+			waitPeriod: waitPeriod,
+		},
+		nil
+}
+
+func (l *TcpListener) Start() error {
+	defer l.listener.Close()
+	l.logger.Info().Msg("Starting service...")
 
 	for {
-		conn, err := listener.Accept()
+		conn, err := l.listener.Accept()
 		if err != nil {
-			fmt.Println("Error accepting connection:", err)
+			l.logger.Error().Err(err).Msg("Error accepting connection.")
 			continue
 		}
 
-		go handleConnection(conn)
+		go l.handleConnection(conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func (l *TcpListener) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		request := scanner.Text()
-		response := handleRequest(request)
+		response := l.handleRequest(request)
 		fmt.Fprintf(conn, "%s\n", response)
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Println("Error reading from connection:", err)
+		l.logger.Error().Err(err).Msg("Error reading from connection.")
 	}
 }
 
-func handleRequest(request string) string {
+func (l *TcpListener) handleRequest(request string) string {
 	payment := payment.FromString(request)
 	response := payment.Process()
 	return response.ToString()

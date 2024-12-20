@@ -3,12 +3,19 @@ package tcp_listener
 import (
 	"bufio"
 	"fmt"
+	"github.com/rs/zerolog"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
+)
+
+const (
+	PORT        = 8080
+	WAIT_PERIOD = 5 * time.Second
 )
 
 type TcpListenerTestSuite struct {
@@ -18,7 +25,14 @@ type TcpListenerTestSuite struct {
 func TestTcpListenerSuite(t *testing.T) {
 	tcpListenerTestSuite := &TcpListenerTestSuite{}
 
-	go Start()
+	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+	listener, err := New(logger, PORT, WAIT_PERIOD)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	go listener.Start()
 
 	// wait of the server to be ready
 	time.Sleep(time.Second)
