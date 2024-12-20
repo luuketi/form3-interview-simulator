@@ -9,14 +9,24 @@ import (
 	"time"
 )
 
+type networkListener interface {
+	Listen(network string, address string) (net.Listener, error)
+}
+
+type NetListener struct{}
+
+func (s NetListener) Listen(network string, address string) (net.Listener, error) {
+	return net.Listen(network, address)
+}
+
 type TcpListener struct {
 	logger     zerolog.Logger
 	listener   net.Listener
 	waitPeriod time.Duration
 }
 
-func New(logger zerolog.Logger, port uint16, waitPeriod time.Duration) (*TcpListener, error) {
-	l, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+func New(logger zerolog.Logger, listener networkListener, port uint16, waitPeriod time.Duration) (*TcpListener, error) {
+	l, err := listener.Listen("tcp", fmt.Sprintf("localhost:%d", port))
 	if err != nil {
 		logger.Error().Err(err).Msg("Error listening connection.")
 		return nil, err
