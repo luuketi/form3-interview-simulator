@@ -45,7 +45,12 @@ func TestSchemeSimulator(t *testing.T) {
 			minDuration:    101 * time.Millisecond,
 			maxDuration:    151 * time.Millisecond,
 		},
-
+		{
+			name:           "Invalid Amount with negative number",
+			input:          "PAYMENT|-101",
+			expectedOutput: "RESPONSE|REJECTED|Invalid amount",
+			maxDuration:    10 * time.Millisecond,
+		},
 		{
 			name:           "Invalid Request Format",
 			input:          "INVALID|100",

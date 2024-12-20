@@ -18,7 +18,7 @@ func FromString(request string) Payment {
 		return Payment{ErrorReason: "Invalid request"}
 	}
 
-	amount, err := strconv.Atoi(parts[1])
+	amount, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
 		return Payment{ErrorReason: "Invalid amount"}
 	}
