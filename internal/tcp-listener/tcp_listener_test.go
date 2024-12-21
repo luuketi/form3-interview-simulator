@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/mock"
+	"math/rand"
 	"net"
 	"os"
 	"strings"
@@ -17,13 +18,13 @@ import (
 )
 
 const (
-	PORT        = 8080
 	WAIT_PERIOD = 5 * time.Second
 )
 
 type NetListenTestSuite struct {
 	suite.Suite
 	listener *TcpListener
+	port     uint16
 }
 
 func TestNetListenSuite(t *testing.T) {
@@ -33,12 +34,14 @@ func TestNetListenSuite(t *testing.T) {
 
 func (suite *NetListenTestSuite) SetupTest() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	listener, err := New(logger, NetListener{}, 8080, WAIT_PERIOD)
+	port := rndPort()
+	listener, err := New(logger, NetListener{}, port, WAIT_PERIOD)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 	suite.listener = listener
+	suite.port = port
 
 	go suite.listener.Start()
 
@@ -112,7 +115,7 @@ func (suite *NetListenTestSuite) TestSchemeSimulator() {
 
 	for _, tt := range tests {
 		suite.Run(tt.name, func() {
-			conn, err := net.Dial("tcp", ":8080")
+			conn, err := net.Dial("tcp", fmt.Sprintf(":%d", suite.port))
 			suite.NoError(err, "Failed to connect to server")
 			defer conn.Close()
 
@@ -146,7 +149,7 @@ func (suite *NetListenTestSuite) Test_TwoRequestsInOneConnection() {
 	expectedResponse1 := "RESPONSE|ACCEPTED|Transaction processed"
 	expectedResponse2 := "RESPONSE|REJECTED|Invalid amount"
 
-	conn, err := net.Dial("tcp", ":8080")
+	conn, err := net.Dial("tcp", fmt.Sprintf(":%d", suite.port))
 	suite.NoError(err, "Failed to connect to server")
 	defer conn.Close()
 
@@ -181,11 +184,11 @@ func (suite *NetListenTestSuite) Test_TwoRequestsInTwoConnections() {
 	msg2 := "PAYMENT|50"
 	expectedResponse := "RESPONSE|ACCEPTED|Transaction processed"
 
-	conn1, err := net.Dial("tcp", ":8080")
+	conn1, err := net.Dial("tcp", fmt.Sprintf(":%d", suite.port))
 	suite.NoError(err, "Failed to connect to server")
 	defer conn1.Close()
 
-	conn2, err := net.Dial("tcp", ":8080")
+	conn2, err := net.Dial("tcp", fmt.Sprintf(":%d", suite.port))
 	suite.NoError(err, "Failed to connect to server")
 	defer conn2.Close()
 
@@ -216,7 +219,7 @@ func (suite *NetListenTestSuite) Test_CancelRequestDueToGracePeriodExpiration() 
 	msg1 := "PAYMENT|50000"
 	expectedResponse := "RESPONSE|REJECTED|Cancelled"
 
-	conn, err := net.Dial("tcp", ":8080")
+	conn, err := net.Dial("tcp", fmt.Sprintf(":%d", suite.port))
 	suite.NoError(err, "Failed to connect to server")
 	defer conn.Close()
 
@@ -241,7 +244,7 @@ func (suite *NetListenTestSuite) Test_CancelRequestDueToGracePeriodExpiration() 
 func (suite *NetListenTestSuite) Test_StoppingServiceStopsNewConnections() {
 	msg1 := "PAYMENT|50000"
 
-	conn, err := net.Dial("tcp", ":8080")
+	conn, err := net.Dial("tcp", fmt.Sprintf(":%d", suite.port))
 	suite.NoError(err, "Failed to connect to server")
 	defer conn.Close()
 
@@ -252,7 +255,7 @@ func (suite *NetListenTestSuite) Test_StoppingServiceStopsNewConnections() {
 
 	time.Sleep(1 * time.Second)
 
-	conn2, err := net.Dial("tcp", ":8080")
+	conn2, err := net.Dial("tcp", fmt.Sprintf(":%d", suite.port))
 	suite.Error(err, "Failed to connect to server")
 	suite.Nil(conn2, "Connection should be nil")
 }
@@ -262,11 +265,11 @@ func (suite *NetListenTestSuite) Test_StoppingServiceKeepsReceivingRequests() {
 	msg2 := "PAYMENT|50"
 	expectedResponse := "RESPONSE|ACCEPTED|Transaction processed"
 
-	conn, err := net.Dial("tcp", ":8080")
+	conn, err := net.Dial("tcp", fmt.Sprintf(":%d", suite.port))
 	suite.NoError(err, "Failed to connect to server")
 	defer conn.Close()
 
-	conn2, err := net.Dial("tcp", ":8080")
+	conn2, err := net.Dial("tcp", fmt.Sprintf(":%d", suite.port))
 	suite.NoError(err, "Failed to connect to server")
 	defer conn2.Close()
 
@@ -386,4 +389,8 @@ func (m *ListenerMock) Close() error {
 func (m *ListenerMock) Addr() net.Addr {
 	args := m.Called()
 	return args.Get(0).(net.Addr)
+}
+
+func rndPort() uint16 {
+	return uint16(rand.Intn(65536-10000) + 10000)
 }
