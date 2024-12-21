@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"net"
 	"os"
 	"strings"
@@ -22,25 +21,36 @@ const (
 	WAIT_PERIOD = 5 * time.Second
 )
 
-func TestMain(m *testing.M) {
+type NetListenTestSuite struct {
+	suite.Suite
+	listener *TcpListener
+}
+
+func TestNetListenSuite(t *testing.T) {
+	mainTestSuite := &NetListenTestSuite{}
+	suite.Run(t, mainTestSuite)
+}
+
+func (suite *NetListenTestSuite) SetupTest() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	listener, err := New(logger, NetListener{}, PORT, WAIT_PERIOD)
+	listener, err := New(logger, NetListener{}, 8080, WAIT_PERIOD)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+	suite.listener = listener
 
-	go listener.Start()
+	go suite.listener.Start()
 
 	// wait of the server to be ready
 	time.Sleep(time.Second)
-
-	code := m.Run()
-
-	os.Exit(code)
 }
 
-func TestSchemeSimulator(t *testing.T) {
+func (suite *NetListenTestSuite) TearDownTest() {
+	suite.listener.Stop()
+}
+
+func (suite *NetListenTestSuite) TestSchemeSimulator() {
 	tests := []struct {
 		name           string
 		input          string
@@ -101,101 +111,187 @@ func TestSchemeSimulator(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		suite.Run(tt.name, func() {
 			conn, err := net.Dial("tcp", ":8080")
-			require.NoError(t, err, "Failed to connect to server")
+			suite.NoError(err, "Failed to connect to server")
 			defer conn.Close()
 
 			_, err = fmt.Fprintf(conn, tt.input+"\n")
-			require.NoError(t, err, "Failed to send request")
+			suite.NoError(err, "Failed to send request")
 
 			start := time.Now()
 
 			response, err := bufio.NewReader(conn).ReadString('\n')
-			require.NoError(t, err, "Failed to read response")
+			suite.NoError(err, "Failed to read response")
 			duration := time.Since(start)
 
 			response = strings.TrimSpace(response)
 
-			require.Equal(t, tt.expectedOutput, response, "Unexpected response")
+			suite.Equal(tt.expectedOutput, response, "Unexpected response")
 
 			if tt.minDuration > 0 {
-				require.GreaterOrEqual(t, duration, tt.minDuration, "Response time was shorter than expected")
+				suite.GreaterOrEqual(duration, tt.minDuration, "Response time was shorter than expected")
 			}
 
 			if tt.maxDuration > 0 {
-				require.LessOrEqual(t, duration, tt.maxDuration, "Response time was longer than expected")
+				suite.LessOrEqual(duration, tt.maxDuration, "Response time was longer than expected")
 			}
 		})
 	}
 }
 
-func Test_TwoRequestsInOneConnection(t *testing.T) {
-	msg1 := "PAYMENT|10"
-	msg2 := "PAYMENT|50"
-	expectedResponse := "RESPONSE|ACCEPTED|Transaction processed"
+func (suite *NetListenTestSuite) Test_TwoRequestsInOneConnection() {
+	msg1 := "PAYMENT|10000"
+	msg2 := "PAYMENT|-50"
+	expectedResponse1 := "RESPONSE|ACCEPTED|Transaction processed"
+	expectedResponse2 := "RESPONSE|REJECTED|Invalid amount"
 
 	conn, err := net.Dial("tcp", ":8080")
-	require.NoError(t, err, "Failed to connect to server")
+	suite.NoError(err, "Failed to connect to server")
 	defer conn.Close()
 
 	_, err = fmt.Fprintf(conn, msg1+"\n")
-	require.NoError(t, err, "Failed to send request 1")
+	suite.NoError(err, "Failed to send request 1")
 	_, err = fmt.Fprintf(conn, msg2+"\n")
-	require.NoError(t, err, "Failed to send request 2")
+	suite.NoError(err, "Failed to send request 2")
 
 	start := time.Now()
 
 	response1, err := bufio.NewReader(conn).ReadString('\n')
-	require.NoError(t, err, "Failed to read response")
+	suite.NoError(err, "Failed to read response")
 	response1 = strings.TrimSpace(response1)
 
+	firstResponseTime := time.Now()
+
 	response2, err := bufio.NewReader(conn).ReadString('\n')
-	require.NoError(t, err, "Failed to read response")
+	suite.NoError(err, "Failed to read response")
 	response2 = strings.TrimSpace(response2)
 
-	duration := time.Since(start)
+	secondResponseTime := time.Now()
 
-	require.Equal(t, expectedResponse, response1, "Unexpected response")
-	require.Equal(t, expectedResponse, response2, "Unexpected response")
+	suite.Equal(expectedResponse1, response1, "Unexpected response")
+	suite.Equal(expectedResponse2, response2, "Unexpected response")
 
-	require.LessOrEqual(t, duration, 50*time.Millisecond, "Response time was longer than expected")
+	suite.LessOrEqual(firstResponseTime.Sub(start), 10*time.Second+50*time.Millisecond, "Response time was longer than expected")
+	suite.LessOrEqual(secondResponseTime.Sub(firstResponseTime), 50*time.Millisecond, "Response time was longer than expected")
 }
 
-func Test_TwoRequestsInTwoConnections(t *testing.T) {
+func (suite *NetListenTestSuite) Test_TwoRequestsInTwoConnections() {
 	msg1 := "PAYMENT|10"
 	msg2 := "PAYMENT|50"
 	expectedResponse := "RESPONSE|ACCEPTED|Transaction processed"
 
 	conn1, err := net.Dial("tcp", ":8080")
-	require.NoError(t, err, "Failed to connect to server")
+	suite.NoError(err, "Failed to connect to server")
 	defer conn1.Close()
 
 	conn2, err := net.Dial("tcp", ":8080")
-	require.NoError(t, err, "Failed to connect to server")
+	suite.NoError(err, "Failed to connect to server")
 	defer conn2.Close()
 
 	_, err = fmt.Fprintf(conn1, msg1+"\n")
-	require.NoError(t, err, "Failed to send request 1")
+	suite.NoError(err, "Failed to send request 1")
 	_, err = fmt.Fprintf(conn2, msg2+"\n")
-	require.NoError(t, err, "Failed to send request 2")
+	suite.NoError(err, "Failed to send request 2")
 
 	start := time.Now()
 
 	response1, err := bufio.NewReader(conn1).ReadString('\n')
-	require.NoError(t, err, "Failed to read response")
+	suite.NoError(err, "Failed to read response")
 	response1 = strings.TrimSpace(response1)
 
 	response2, err := bufio.NewReader(conn2).ReadString('\n')
-	require.NoError(t, err, "Failed to read response")
+	suite.NoError(err, "Failed to read response")
 	response2 = strings.TrimSpace(response2)
 
 	duration := time.Since(start)
 
-	require.Equal(t, expectedResponse, response1, "Unexpected response")
-	require.Equal(t, expectedResponse, response2, "Unexpected response")
+	suite.Equal(expectedResponse, response1, "Unexpected response")
+	suite.Equal(expectedResponse, response2, "Unexpected response")
 
-	require.LessOrEqual(t, duration, 50*time.Millisecond, "Response time was longer than expected")
+	suite.LessOrEqual(duration, 50*time.Millisecond, "Response time was longer than expected")
+}
+
+func (suite *NetListenTestSuite) Test_CancelRequestDueToGracePeriodExpiration() {
+	msg1 := "PAYMENT|50000"
+	expectedResponse := "RESPONSE|REJECTED|Cancelled"
+
+	conn, err := net.Dial("tcp", ":8080")
+	suite.NoError(err, "Failed to connect to server")
+	defer conn.Close()
+
+	_, err = fmt.Fprintf(conn, msg1+"\n")
+	suite.NoError(err, "Failed to send request 1")
+
+	go suite.listener.Stop()
+
+	start := time.Now()
+
+	response, err := bufio.NewReader(conn).ReadString('\n')
+	suite.NoError(err, "Failed to read response")
+	response = strings.TrimSpace(response)
+
+	duration := time.Since(start)
+
+	suite.Equal(expectedResponse, response, "Unexpected response")
+
+	suite.LessOrEqual(duration, WAIT_PERIOD+50*time.Millisecond, "Response time was longer than expected")
+}
+
+func (suite *NetListenTestSuite) Test_StoppingServiceStopsNewConnections() {
+	msg1 := "PAYMENT|50000"
+
+	conn, err := net.Dial("tcp", ":8080")
+	suite.NoError(err, "Failed to connect to server")
+	defer conn.Close()
+
+	_, err = fmt.Fprintf(conn, msg1+"\n")
+	suite.NoError(err, "Failed to send request 1")
+
+	go suite.listener.Stop()
+
+	time.Sleep(1 * time.Second)
+
+	conn2, err := net.Dial("tcp", ":8080")
+	suite.Error(err, "Failed to connect to server")
+	suite.Nil(conn2, "Connection should be nil")
+}
+
+func (suite *NetListenTestSuite) Test_StoppingServiceKeepsReceivingRequests() {
+	msg1 := "PAYMENT|50000"
+	msg2 := "PAYMENT|50"
+	expectedResponse := "RESPONSE|ACCEPTED|Transaction processed"
+
+	conn, err := net.Dial("tcp", ":8080")
+	suite.NoError(err, "Failed to connect to server")
+	defer conn.Close()
+
+	conn2, err := net.Dial("tcp", ":8080")
+	suite.NoError(err, "Failed to connect to server")
+	defer conn2.Close()
+
+	_, err = fmt.Fprintf(conn, msg1+"\n")
+	suite.NoError(err, "Failed to send request 1")
+
+	go suite.listener.Stop()
+
+	time.Sleep(1 * time.Second)
+
+	_, err = fmt.Fprintf(conn2, msg2+"\n")
+	suite.NoError(err, "Failed to send request 1")
+
+	response, err := bufio.NewReader(conn2).ReadString('\n')
+	suite.NoError(err, "Failed to read response")
+	response = strings.TrimSpace(response)
+	suite.Equal(expectedResponse, response, "Unexpected response")
+
+	_, err = fmt.Fprintf(conn2, msg2+"\n")
+	suite.NoError(err, "Failed to send request 1")
+
+	response2, err := bufio.NewReader(conn2).ReadString('\n')
+	suite.NoError(err, "Failed to read response")
+	response2 = strings.TrimSpace(response2)
+	suite.Equal(expectedResponse, response2, "Unexpected response")
 }
 
 type TcpListenerTestSuite struct {

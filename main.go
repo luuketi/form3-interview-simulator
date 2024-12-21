@@ -26,6 +26,9 @@ func main() {
 
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
-
 	<-shutdown
+
+	logger.Info().Msg("Shutting down service...")
+	listener.Stop()
+	logger.Info().Msg("Service stopped.")
 }
