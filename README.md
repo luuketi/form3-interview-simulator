@@ -27,7 +27,3 @@ $ make test
 ## Instructions
 
 Located in `INSTRUCTIONS.md`
-
-## Decisions
-
-Assumptions made about the product are located in `DECISIONS.md`
