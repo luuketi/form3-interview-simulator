@@ -16,7 +16,11 @@ const (
 
 func main() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	listener, err := tcp_listener.New(logger, tcp_listener.NetListener{}, PORT, WAIT_PERIOD)
+	listener, err := tcp_listener.New(PORT, WAIT_PERIOD, &tcp_listener.TcpListenerDeps{
+		Logger:     logger,
+		Listener:   tcp_listener.NetListener{},
+		NewScanner: tcp_listener.BufioScanner{},
+	})
 	if err != nil {
 		logger.Error().Err(err).Msg("Error creating listener.")
 		os.Exit(1)

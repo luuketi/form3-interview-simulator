@@ -1,16 +1,16 @@
-package tcp_listener
+package tcp_listener_test
 
 import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/form3tech-oss/interview-simulator/internal/mocks"
+	"github.com/form3tech-oss/interview-simulator/internal/tcp-listener"
 	"github.com/rs/zerolog"
-	"github.com/stretchr/testify/mock"
 	"math/rand"
 	"net"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -21,9 +21,22 @@ const (
 	WAIT_PERIOD = 5 * time.Second
 )
 
+type logSink struct {
+	logs []string
+}
+
+func (l *logSink) Write(p []byte) (n int, err error) {
+	l.logs = append(l.logs, string(p))
+	return len(p), nil
+}
+
+func (l *logSink) Last() string {
+	return l.logs[(len(l.logs) - 1)]
+}
+
 type NetListenTestSuite struct {
 	suite.Suite
-	listener *TcpListener
+	listener *tcp_listener.TcpListener
 	port     uint16
 }
 
@@ -35,7 +48,7 @@ func TestNetListenSuite(t *testing.T) {
 func (suite *NetListenTestSuite) SetupTest() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	port := rndPort()
-	listener, err := New(logger, NetListener{}, port, WAIT_PERIOD)
+	listener, err := tcp_listener.New(port, WAIT_PERIOD, &tcp_listener.TcpListenerDeps{Logger: logger, Listener: tcp_listener.NetListener{}, NewScanner: tcp_listener.BufioScanner{}})
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -299,7 +312,7 @@ func (suite *NetListenTestSuite) Test_StoppingServiceKeepsReceivingRequests() {
 
 type TcpListenerTestSuite struct {
 	suite.Suite
-	listener *TcpListener
+	listener *tcp_listener.TcpListener
 }
 
 func TestTcpListenerSuite(t *testing.T) {
@@ -308,87 +321,133 @@ func TestTcpListenerSuite(t *testing.T) {
 }
 
 func (suite *TcpListenerTestSuite) Test_FailingListener() {
-	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	l := ListenerMock{}
-	l.On("Accept").Return(new(net.TCPConn), nil)
-	netListener := NetListenerMock(&l)
+	logs := &logSink{}
+	logger := zerolog.New(logs).With().Timestamp().Logger()
 	expectedErr := errors.New("test error")
-	netListener.SetError(expectedErr)
 
-	listener, err := New(logger, &netListener, 8080, WAIT_PERIOD)
+	l := mocks.NewMockListener()
+	nl := mocks.MockNetListener{}
+	nl.On("Listen").Return(l, expectedErr).Once()
 
-	suite.Nil(listener)
+	_, err := tcp_listener.New(8080, WAIT_PERIOD, &tcp_listener.TcpListenerDeps{Logger: logger, Listener: &nl, NewScanner: tcp_listener.BufioScanner{}})
+
 	suite.Equal(expectedErr, err)
+	nl.AssertExpectations(suite.T())
+	suite.Contains(logs.Last(), "Error listening connection.")
 }
 
 func (suite *TcpListenerTestSuite) Test_FailingAcceptShouldRetry() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	l := NewListenerMock()
-	l.On("Accept").Return(new(net.TCPConn), errors.New("test error")).Times(2)
-	netListener := NetListenerMock(l)
 
-	listener, err := New(logger, &netListener, 8080, WAIT_PERIOD)
+	l := mocks.NewMockListener()
+	l.On("Accept").Return(new(net.TCPConn), errors.New("test error")).Times(2)
+
+	nl := mocks.MockNetListener{}
+	nl.On("Listen").Return(l, nil).Once()
+
+	listener, err := tcp_listener.New(8080, WAIT_PERIOD, &tcp_listener.TcpListenerDeps{Logger: logger, Listener: &nl, NewScanner: tcp_listener.BufioScanner{}})
 	go listener.Start()
 	time.Sleep(1 * time.Second)
 
 	suite.NotNil(listener)
 	suite.Nil(err)
 	l.AssertExpectations(suite.T())
+	nl.AssertExpectations(suite.T())
 }
 
-type MockNetListener struct {
-	listener net.Listener
-	err      error
+func (suite *TcpListenerTestSuite) Test_ScannerWithClosedConnectionShouldSilentlyFail() {
+	logs := &logSink{}
+	logger := zerolog.New(logs).With().Timestamp().Logger()
+
+	c := &mocks.MockConnection{}
+	c.On("Read").Return(0, nil)
+	c.On("Write").Return(0, nil)
+	c.On("Close").Return(nil)
+
+	l := mocks.NewMockListener()
+	l.On("Accept").Return(c, nil)
+	nl := mocks.MockNetListener{}
+	nl.On("Listen").Return(l, nil)
+	s := mocks.MockBufioScanner{}
+
+	s.On("Scan").Return(false)
+	s.On("Err").Return(errors.New("test error"))
+	newScanner := mocks.NewMockNewScanner(&s)
+
+	listener, err := tcp_listener.New(8080, WAIT_PERIOD, &tcp_listener.TcpListenerDeps{Logger: logger, Listener: &nl, NewScanner: newScanner})
+	go listener.Start()
+
+	time.Sleep(1 * time.Second)
+
+	suite.NotNil(listener)
+	suite.Nil(err)
+	suite.Contains(logs.Last(), "Error reading from connection.")
 }
 
-func NetListenerMock(listener net.Listener) MockNetListener {
-	return MockNetListener{listener: listener, err: nil}
+func (suite *TcpListenerTestSuite) Test_CancelledRequestFailingToBeSentShouldSilentlyFail() {
+	msg := "PAYMENT|10000"
+	logs := &logSink{}
+	logger := zerolog.New(logs).With().Timestamp().Logger()
+	c := &mocks.MockConnection{}
+	c.On("Read").Return(len(msg), nil)
+	c.On("Write").Return(0, errors.New("test error"))
+	c.On("Close").Return(nil)
+
+	l := mocks.NewMockListener()
+	l.On("Accept").Return(c, nil)
+	l.On("Close").Return(nil)
+	nl := mocks.MockNetListener{}
+	nl.On("Listen").Return(l, nil)
+
+	s := mocks.MockBufioScanner{}
+	s.On("Scan").Return(true)
+	s.On("Text").Return(msg)
+	s.On("Err").Return(nil)
+	newScanner := mocks.NewMockNewScanner(&s)
+
+	listener, err := tcp_listener.New(8080, WAIT_PERIOD, &tcp_listener.TcpListenerDeps{Logger: logger, Listener: &nl, NewScanner: newScanner})
+	go listener.Start()
+
+	time.Sleep(1 * time.Second)
+
+	listener.Stop()
+
+	suite.NotNil(listener)
+	suite.Nil(err)
+	suite.Contains(logs.Last(), "Error sending cancelled response.")
 }
 
-func (b *MockNetListener) SetError(err error) {
-	b.err = err
-}
+func (suite *TcpListenerTestSuite) Test_FailingCloseConnectionShouldSilentlyFail() {
+	msg := "PAYMENT|10"
+	logs := &logSink{}
+	logger := zerolog.New(logs).With().Timestamp().Logger()
+	c := &mocks.MockConnection{}
+	c.On("Read").Return(len(msg), nil)
+	c.On("Write").Return(0, nil)
+	c.On("Close").Return(errors.New("test error"))
 
-func (b *MockNetListener) Listen(network string, address string) (net.Listener, error) {
-	if b.err != nil {
-		return nil, b.err
-	}
-	return b.listener, nil
-}
+	l := mocks.NewMockListener()
+	l.On("Accept").Return(c, nil)
+	l.On("Close").Return(nil)
+	nl := mocks.MockNetListener{}
+	nl.On("Listen").Return(l, nil)
 
-type ListenerMock struct {
-	mock.Mock
-	wg               sync.WaitGroup
-	mu               sync.Mutex
-	connectionsCount int
-}
+	s := mocks.MockBufioScanner{}
+	s.On("Scan").Return(true)
+	s.On("Text").Return(msg)
+	s.On("Err").Return(nil)
+	newScanner := mocks.NewMockNewScanner(&s)
 
-func NewListenerMock() *ListenerMock {
-	l := &ListenerMock{wg: sync.WaitGroup{}}
-	l.wg.Add(1)
-	return l
-}
+	listener, err := tcp_listener.New(8080, WAIT_PERIOD, &tcp_listener.TcpListenerDeps{Logger: logger, Listener: &nl, NewScanner: newScanner})
+	go listener.Start()
 
-func (m *ListenerMock) Accept() (net.Conn, error) {
-	m.mu.Lock()
-	if m.connectionsCount < 2 {
-		m.connectionsCount++
-		m.mu.Unlock()
-	} else {
-		m.wg.Wait()
-	}
-	args := m.Called()
-	return args.Get(0).(net.Conn), args.Error(1)
-}
+	time.Sleep(1 * time.Second)
 
-func (m *ListenerMock) Close() error {
-	args := m.Called()
-	return args.Error(0)
-}
+	listener.Stop()
 
-func (m *ListenerMock) Addr() net.Addr {
-	args := m.Called()
-	return args.Get(0).(net.Addr)
+	suite.NotNil(listener)
+	suite.Nil(err)
+	suite.Contains(logs.Last(), "Error closing connection.")
 }
 
 func rndPort() uint16 {

@@ -7,6 +7,7 @@ import (
 	"github.com/form3tech-oss/interview-simulator/internal/payment"
 	response "github.com/form3tech-oss/interview-simulator/internal/response"
 	"github.com/rs/zerolog"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -22,25 +23,47 @@ func (s NetListener) Listen(network string, address string) (net.Listener, error
 	return net.Listen(network, address)
 }
 
+type newScanner interface {
+	NewScanner(r io.Reader) Scanner
+}
+
+type BufioScanner struct{}
+
+func (s BufioScanner) NewScanner(r io.Reader) Scanner {
+	return bufio.NewScanner(r)
+}
+
+type Scanner interface {
+	Scan() bool
+	Text() string
+	Err() error
+}
+
 type TcpListener struct {
-	logger           zerolog.Logger
 	wg               sync.WaitGroup
-	listener         net.Listener
 	waitPeriod       time.Duration
 	mu               sync.Mutex
 	connections      map[net.Conn]struct{}
 	shutdownListener bool
+	listener         net.Listener
+	deps             TcpListenerDeps
 }
 
-func New(logger zerolog.Logger, listener networkListener, port uint16, waitPeriod time.Duration) (*TcpListener, error) {
-	l, err := listener.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+type TcpListenerDeps struct {
+	Logger     zerolog.Logger
+	Listener   networkListener
+	NewScanner newScanner
+}
+
+func New(port uint16, waitPeriod time.Duration, deps *TcpListenerDeps) (*TcpListener, error) {
+	l, err := deps.Listener.Listen("tcp", fmt.Sprintf("localhost:%d", port))
 	if err != nil {
-		logger.Error().Err(err).Msg("Error listening connection.")
+		deps.Logger.Error().Err(err).Msg("Error listening connection.")
 		return nil, err
 	}
 	return &TcpListener{
-			logger:           logger,
 			listener:         l,
+			deps:             *deps,
 			waitPeriod:       waitPeriod,
 			connections:      make(map[net.Conn]struct{}),
 			shutdownListener: false,
@@ -49,7 +72,7 @@ func New(logger zerolog.Logger, listener networkListener, port uint16, waitPerio
 }
 
 func (l *TcpListener) Start() {
-	l.logger.Info().Msg("Starting service...")
+	l.deps.Logger.Info().Msg("Starting service...")
 	for {
 		connection, err := l.listener.Accept()
 		if err != nil {
@@ -60,11 +83,11 @@ func (l *TcpListener) Start() {
 			}
 			l.mu.Unlock()
 			if !errors.Is(err, net.ErrClosed) {
-				l.logger.Error().Err(err).Msg("Error accepting connection.")
+				l.deps.Logger.Error().Err(err).Msg("Error accepting connection.")
 			}
 			continue
 		}
-		l.logger.Info().Msg("Accepted new connection.")
+		l.deps.Logger.Info().Msg("Accepted new connection.")
 		l.storeConnection(connection)
 		go l.handleConnection(connection)
 	}
@@ -76,7 +99,7 @@ func (l *TcpListener) Stop() {
 	err := l.listener.Close()
 	l.mu.Unlock()
 	if err != nil {
-		l.logger.Error().Err(err).Msg("Error closing listener.")
+		l.deps.Logger.Error().Err(err).Msg("Error closing listener.")
 		return
 	}
 
@@ -88,9 +111,9 @@ func (l *TcpListener) Stop() {
 
 	select {
 	case <-done:
-		l.logger.Info().Msg("All connections completed gracefully.")
+		l.deps.Logger.Info().Msg("All connections completed gracefully.")
 	case <-time.After(l.waitPeriod):
-		l.logger.Info().Msg("Grace period finished for active requests. Cancelling pending requests...")
+		l.deps.Logger.Info().Msg("Grace period finished for active requests. Cancelling pending requests...")
 		l.closeConnections()
 	}
 }
@@ -108,17 +131,25 @@ func (l *TcpListener) closeConnections() {
 	for connection := range l.connections {
 		rejected := response.NewRejected("Cancelled")
 		if err := l.sendResponse(connection, rejected.ToString()); err != nil {
+			l.deps.Logger.Error().Err(err).Msg("Error sending cancelled response.")
 			return
 		}
-		connection.Close()
+		l.closeConnection(connection)
+	}
+}
+
+func (l *TcpListener) closeConnection(connection net.Conn) {
+	err := connection.Close()
+	if err != nil {
+		l.deps.Logger.Error().Err(err).Msg("Error closing connection.")
 	}
 }
 
 func (l *TcpListener) sendResponse(connection net.Conn, resp string) (err error) {
-	l.logger.Debug().Str("response", resp).Msg("Sending response.")
+	l.deps.Logger.Debug().Str("response", resp).Msg("Sending response.")
 	_, err = fmt.Fprintf(connection, "%s\n", resp)
 	if err != nil {
-		l.logger.Error().Err(err).Msg("Error writing response to connection.")
+		l.deps.Logger.Error().Err(err).Msg("Error writing response to connection.")
 	}
 	return
 }
@@ -127,10 +158,10 @@ func (l *TcpListener) handleConnection(connection net.Conn) {
 	defer l.wg.Done()
 	defer l.deleteAndCloseConnection(connection)
 
-	scanner := bufio.NewScanner(connection)
+	scanner := l.deps.NewScanner.NewScanner(connection)
 	for scanner.Scan() {
 		request := scanner.Text()
-		l.logger.Debug().Str("request", request).Msg("Received request.")
+		l.deps.Logger.Debug().Str("request", request).Msg("Received request.")
 		payment := payment.FromString(request)
 		resp := payment.Process()
 		if err := l.sendResponse(connection, resp.ToString()); err != nil {
@@ -138,7 +169,7 @@ func (l *TcpListener) handleConnection(connection net.Conn) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		l.logger.Error().Err(err).Msg("Error reading from connection.")
+		l.deps.Logger.Error().Err(err).Msg("Error reading from connection.")
 	}
 }
 
@@ -146,5 +177,5 @@ func (l *TcpListener) deleteAndCloseConnection(connection net.Conn) {
 	l.mu.Lock()
 	delete(l.connections, connection)
 	l.mu.Unlock()
-	connection.Close()
+	l.closeConnection(connection)
 }
