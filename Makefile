@@ -2,7 +2,7 @@
 APP_NAME := form3-interview-simulator
 SRC_DIR := ./
 BUILD_DIR := ./bin
-GO := /home/lucas/go/go1.23.4/bin/go
+GO := go
 TEST_FLAGS := -v -count=1
 LDFLAGS := -s -w
 GOFILES := $(shell find . -name '*.go' -not -path "./vendor/*")
@@ -28,7 +28,7 @@ run: build
 
 # Test the project
 .PHONY: test
-test:
+test: build
 	@echo "Running tests..."
 	$(GO) test ./... $(TEST_FLAGS)
 
@@ -37,7 +37,3 @@ test:
 clean:
 	@echo "Cleaning build directory..."
 	@rm -rf $(BUILD_DIR)
-
-# Run everything (build, test, run)
-.PHONY: all
-all: test build run
