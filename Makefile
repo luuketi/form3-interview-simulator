@@ -1,6 +1,6 @@
 # Variables
 APP_NAME := form3-interview-simulator
-SRC_DIR := ./
+SRC_DIR := ./cmd/$(APP_NAME)
 BUILD_DIR := ./bin
 GO := go
 TEST_FLAGS := -v -count=1
