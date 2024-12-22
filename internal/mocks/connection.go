@@ -10,12 +10,12 @@ type MockConnection struct {
 	mock.Mock
 }
 
-func (c *MockConnection) Read(b []byte) (n int, err error) {
+func (c *MockConnection) Read([]byte) (n int, err error) {
 	args := c.Called()
 	return args.Int(0), args.Error(1)
 }
 
-func (c *MockConnection) Write(b []byte) (n int, err error) {
+func (c *MockConnection) Write([]byte) (n int, err error) {
 	args := c.Called()
 	return args.Int(0), args.Error(1)
 }
@@ -35,17 +35,17 @@ func (c *MockConnection) RemoteAddr() net.Addr {
 	return args.Get(0).(net.Addr)
 }
 
-func (c *MockConnection) SetDeadline(t time.Time) error {
+func (c *MockConnection) SetDeadline(time.Time) error {
 	args := c.Called()
 	return args.Error(0)
 }
 
-func (c *MockConnection) SetReadDeadline(t time.Time) error {
+func (c *MockConnection) SetReadDeadline(time.Time) error {
 	args := c.Called()
 	return args.Error(0)
 }
 
-func (c *MockConnection) SetWriteDeadline(t time.Time) error {
+func (c *MockConnection) SetWriteDeadline(time.Time) error {
 	args := c.Called()
 	return args.Error(0)
 }

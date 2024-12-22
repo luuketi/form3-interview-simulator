@@ -14,7 +14,7 @@ func NewMockNewScanner(scanner tcp_listener.Scanner) *MockNewScanner {
 	return &MockNewScanner{scanner: scanner}
 }
 
-func (b *MockNewScanner) NewScanner(r io.Reader) tcp_listener.Scanner {
+func (b *MockNewScanner) NewScanner(io.Reader) tcp_listener.Scanner {
 	return b.scanner
 }
 

@@ -10,7 +10,7 @@ type MockNetListener struct {
 	mock.Mock
 }
 
-func (b *MockNetListener) Listen(network string, address string) (net.Listener, error) {
+func (b *MockNetListener) Listen(string, string) (net.Listener, error) {
 	args := b.Called()
 	return args.Get(0).(net.Listener), args.Error(1)
 }
